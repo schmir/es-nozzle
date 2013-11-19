@@ -36,6 +36,7 @@
   (let [qs (apply rmqapi/list-queues args)]
     (when-not qs
       (throw-management-api-error))
+    (println "got" qs)
     qs))
 
 
@@ -77,25 +78,90 @@ stops calling the scheduled functions"
   ([ms] (pulse (chan) ms))
   ([ch ms]
      (let [ctrl-ch (chan)]
-       (async/go
+       (go
         (loop [count 0]
           (>! ch {:count count})
           (async/alt!
            ctrl-ch ([v] (async/close! ch))
            (async/timeout ms) ([v] (recur (inc count))))))
-       {:ch ch :pulse-ctrl-ch ctrl-ch})))
+       {:ch ch
+        ::pulse-ctrl-ch ctrl-ch})))
+
+(defn looping-call
+  [ms f]
+  (let [ctrl-ch (chan)]
+    (go
+     (loop []
+       (<! (f))
+       (async/alt!
+        ctrl-ch ([v] (async/close! ch))
+        (async/timeout ms) ([v] (recur)))))
+    {::ctrl-ch ctrl-ch}))
+
+(defn looping-thread-call
+  [ms f]
+  (looping-call ms #(async/thread-call f)))
+
+;; (looping-call 2000 go-list-queues)
+(looping-thread-call 2000 list-queues)
+
+(defn go-list-queues
+  []
+  (async/thread-call list-queues))
+
+(defn looping-call-stop
+  [{ctrl-ch ::ctrl-ch}]
+  (async/close! ctrl-ch))
+
+(defn tap-fn
+  [ch f]
+  (let [ret (try (f)
+                 (catch Throwable t
+                   nil))]))
+
+
 
 (defn stop-pulse
-  [{pulse-ctrl-ch :pulse-ctrl-ch}]
+  [{pulse-ctrl-ch ::pulse-ctrl-ch}]
   (async/close! pulse-ctrl-ch))
 
+
+(defn looping-call
+  [ms f]
+  (let [p (pulse ms)]
+    (go
+     (loop []
+       (let [msg (<! (:ch p))]
+         (when-not (nil? msg)
+           (<! (go (f)))
+           (recur)))))
+    p))
+
+
+(defn pulse-call
+  [p f]
+  (go
+   (loop []
+     (let [msg (<! (:ch p))]
+       (when-not (nil? msg)
+         (f)
+         (recur))))))
+
+(defn periodically-thread-call
+  [ms f])
 
 (defn pulse-fn
   "call function fn periodically, sleep ms milliseconds between two
 calls, puts the result of the function calls on the channel ch"
   [ch ms f]
   (let [p (pulse ms)]
-    (map< (fn [x] x) hidden-channel)))
+    (go
+     (loop []
+       (let [msg (<! (:ch p))]
+         (println "got message" msg)
+         (when-not (nil? msg)
+           (recur)))))
+    p))
 
 (async/go )
 
