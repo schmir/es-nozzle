@@ -28,9 +28,11 @@ ms milliseconds before calling f again"
 
 (defn looping-thread
   "call f in a loop from a thread. sleep ms milliseconds between."
-  [ms f]
-  (assert (ifn? f) "f must be a function")
-  (looping-go ms #(async/thread-call f)))
+  ([ms f]
+     (looping-thread ms f nil))
+  ([ms f dest-ch]
+     (assert (ifn? f) "f must be a function")
+     (looping-go ms #(async/thread-call f))))
 
 
 (defn looping-stop
@@ -38,24 +40,6 @@ ms milliseconds before calling f again"
   [{ctrl-ch ::ctrl-ch}]
   (async/close! ctrl-ch))
 
-
-(defn redirect-fn-to-channel
-  "return a fn that - when called - calls f and additionally puts the
-result on channel ch"
-  [f ch]
-  (fn []
-    (let [res (f)]
-      (when-not (nil? res)
-        (>!! ch res))
-      res)))
-
-
-(defn when-loop-stopped
-  "call fn f when loop is stopped"
-  [{ctrl-ch ::ctrl-ch} f]
-  (go
-   (<! ctrl-ch)
-   (f)))
 
 
 (defn make-looping-thread-mult
@@ -66,13 +50,9 @@ returned inside the return value as :mult key
   [ms f]
   (assert (ifn? f) "f must be a function")
   (let [ch (chan)
-        m (mult ch)
-        wrap-f (redirect-fn-to-channel f ch)
-        retval (assoc (looping-thread ms wrap-f)
-                 :mult m)]
-    ;; close the channel if the loop is stopped
-    (when-loop-stopped retval #(close! ch))
-    retval))
+        m (mult ch)]
+    (assoc (looping-thread ms f ch)
+      :mult m)))
 
 #_(defn mark
   []
