@@ -12,13 +12,17 @@ ms milliseconds before calling f again"
      (assert (ifn? f) "f must be a function")
      (let [ctrl-ch (chan)]
        (go
-        (loop []
-          (let [r (<! (f))]
-            (when-not (or (nil? r) (nil? dest-ch))
-              (>! dest-ch r)))
-          (async/alt!
-           ctrl-ch ([v] nil)
-           (async/timeout ms) ([v] (recur)))))
+        (try
+          (loop []
+            (let [r (<! (f))]
+              (when-not (or (nil? r) (nil? dest-ch))
+                (>! dest-ch r)))
+            (async/alt!
+             ctrl-ch ([v] nil)
+             (async/timeout ms) ([v] (recur))))
+          (finally
+            (when-not (nil? dest-ch)
+              (close! dest-ch)))))
        {::ctrl-ch ctrl-ch})))
 
 
